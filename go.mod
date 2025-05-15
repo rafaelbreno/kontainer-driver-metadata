@@ -1,6 +1,8 @@
 module github.com/rancher/kontainer-driver-metadata
 
-go 1.22
+go 1.23.0
+
+toolchain go1.24.2
 
 replace (
 	github.com/knative/pkg => github.com/rancher/pkg v0.0.0-20190514055449-b30ab9de040e
@@ -9,6 +11,8 @@ replace (
 
 require (
 	github.com/blang/semver v3.5.1+incompatible
+	github.com/goccy/go-yaml v1.17.1
+	github.com/google/go-github/v72 v72.0.0
 	github.com/rancher/rke v1.5.6
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.4
@@ -36,7 +40,8 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
