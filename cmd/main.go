@@ -153,7 +153,7 @@ func main() {
 	for _, valNode := range lastReleaseMap.Values {
 		keyNode, ok := valNode.Key.(*ast.StringNode)
 		if !ok {
-			continue // Should not happen in well-formed YAML from your example
+			continue
 		}
 		switch keyNode.Value {
 		case "minChannelServerVersion":
@@ -165,18 +165,11 @@ func main() {
 				prevMaxChannelServerVersion = v.Value
 			}
 		case "serverArgs":
-			if saMap, ok := valNode.Value.(*ast.MappingNode); ok {
-				if saMap == nil {
-					log.Println("saMap is nil after type assertion ??")
-					continue
-				}
-
-				var nodeInterface ast.Node = saMap
-
-				if anchor := nodeInterface.GetAnchor(); anchor != nil {
-					if anchorNameNode, ok := anchor.Name.(*ast.StringNode); ok {
-						baseServerArgsAnchorName = anchorNameNode.Value
-					}
+			if anchorNode, ok := valNode.Value.(*ast.AnchorNode); ok {
+				if nameNode, ok := anchorNode.Name.(*ast.StringNode); ok {
+					baseServerArgsAnchorName = nameNode.Value
+				} else {
+					log.Printf("Warning: 'serverArgs' in the last release was not directly an ast.AnchorNode. Its type is %T. No base anchor name retrieved for merging.", valNode.Value)
 				}
 			}
 		}
