@@ -58,6 +58,15 @@ func (r Release) SanitizeVersion() string {
 
 }
 
+func SanitizeVersion(v string) string {
+	regexStr := `[^a-zA-Z0-9_-]`
+	re, err := regexp.Compile(regexStr)
+	if err != nil {
+		log.Fatalf("Failed to parse regex string '%s': %v", regexStr, err)
+	}
+	return re.ReplaceAllString(v, "-")
+}
+
 func (r Release) ServerArgsAnchorName() string {
 	return "serverArgs-" + r.SanitizeVersion()
 }
@@ -71,8 +80,9 @@ func (r Release) ChartsAnchorName() string {
 }
 
 const (
-	channelsRKE2Filename = "channels-rke2.yaml"
-	channelsK3sFilename  = "channels.yaml"
+	channelsRKE2Filename       = "channels-rke2.yaml"
+	channelsRKE2OutputFilename = "channels-rke2.output.yaml"
+	channelsK3sFilename        = "channels.yaml"
 )
 
 var (
@@ -100,6 +110,10 @@ func main() {
 	// Something that we don't have in `channels-rke2.yaml`,
 	// so we can just assume:
 	docBody := file.Docs[0].Body
+
+	newReleaseVersion := "v1.32.5+rke2r1"
+	newServerArgsAnchorName := "serverArgs-" + SanitizeVersion(newReleaseVersion)
+
 	releaseToInsert := Release{
 		minChannelServerVersion: "v2.11.0-alpha1",
 		maxChannelServerVersion: "v2.11.99",
@@ -117,6 +131,7 @@ func main() {
 	}
 
 	var prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName string
+	//var lastReleaseVersionString string
 
 	// Path to the 'releases' array itself
 	releasesPathString := "$.releases"
@@ -143,7 +158,6 @@ func main() {
 
 	// Get the last element from the sequence
 	lastReleaseNode := releasesSeqNode.Values[len(releasesSeqNode.Values)-1]
-
 	// Ensure the last element is a MappingNode (a map)
 	lastReleaseMap, ok := lastReleaseNode.(*ast.MappingNode)
 	if !ok {
@@ -186,6 +200,9 @@ func main() {
 	//fmt.Println("Aloo", prevReleasePath.String())
 
 	newReleaseValues := []*ast.MappingValueNode{}
+	newReleaseValues = append(newReleaseValues, createMappingValue("version", createStringNode(newReleaseVersion)))
+	newReleaseValues = append(newReleaseValues, createMappingValue("minChannelServerVersion", createStringNode(prevMinChannelServerVersion)))
+	newReleaseValues = append(newReleaseValues, createMappingValue("maxChannelServerVersion", createStringNode(prevMaxChannelServerVersion)))
 
 	serverArgsContentValues := []*ast.MappingValueNode{}
 	serverArgsContentValues = append(serverArgsContentValues, &ast.MappingValueNode{
@@ -207,7 +224,7 @@ func main() {
 	}
 
 	newServerArgsAnchorNode := &ast.AnchorNode{
-		Name:  createStringNode("aaaaaaaaa"),
+		Name:  createStringNode(newServerArgsAnchorName),
 		Value: actualNewServerArgsMap,
 	}
 
@@ -218,16 +235,22 @@ func main() {
 	}
 
 	// --- 6. Insert the New Release Node into the 'releases' Array ---
-	releasesPath, err := yaml.PathString(releasesPathString)
+	releasesSeqNode.Values = append(releasesSeqNode.Values, newReleaseNode)
+	fmt.Printf("Prepared new release '%s' for inclusion in AST.\n", newReleaseVersion)
+
+	// --- 7. Serialize the Modified AST back to YAML ---
+	outputYAML := file.String()
+	err = os.WriteFile(channelsRKE2OutputFilename, []byte(outputYAML), 0644)
 	if err != nil {
-		log.Fatalf("Failed to create path for 'releases' array: %v", err)
+		log.Fatalf("Failed to write updated YAML: %v", err)
 	}
 
-	//The Insert function modifies the AST pointed to by docBody using the releasesPath.
-	err = releasesPath.Insert(docBody, newReleaseNode)
-	if err != nil {
-		log.Fatalf("Failed to insert new release node into AST: %v", err)
-	}
+	fmt.Printf("Successfully added new release '%s'\n", newReleaseVersion)
+
+	//releasesPath, err := yaml.PathString(releasesPathString)
+	//if err != nil {
+	//log.Fatalf("Failed to create path for 'releases' array: %v", err)
+	//}
 
 	//_ = github.NewClient(nil)
 	//b, err := os.ReadFile(channelsRKE2Filename)
