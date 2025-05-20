@@ -1,8 +1,8 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
+	"go.uber.org/zap"
 )
 
 type (
@@ -52,7 +53,7 @@ func (r Release) SanitizeVersion() string {
 	regexStr := `[^a-zA-Z0-9_-]`
 	re, err := regexp.Compile(regexStr)
 	if err != nil {
-		log.Fatalf("Failed to parse regex string '%s': %v", regexStr, err)
+		zap.L().Sugar().Fatalf("Failed to parse regex string '%s': %v", regexStr, err)
 	}
 	return re.ReplaceAllString(r.Version, "-")
 
@@ -62,7 +63,7 @@ func SanitizeVersion(v string) string {
 	regexStr := `[^a-zA-Z0-9_-]`
 	re, err := regexp.Compile(regexStr)
 	if err != nil {
-		log.Fatalf("Failed to parse regex string '%s': %v", regexStr, err)
+		zap.L().Sugar().Fatalf("Failed to parse regex string '%s': %v", regexStr, err)
 	}
 	return re.ReplaceAllString(v, "-")
 }
@@ -91,18 +92,26 @@ var (
 )
 
 func main() {
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		zap.L().Sugar().Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer logger.Sync()
+
+	zap.ReplaceGlobals(logger)
+
 	b, err := os.ReadFile(channelsRKE2Filename)
 	if err != nil {
-		log.Fatalf("Failed to read '%s' file: %v", channelsRKE2Filename, err)
+		zap.L().Sugar().Fatalf("Failed to read '%s' file: %v", channelsRKE2Filename, err)
 	}
 
 	file, err := parser.ParseBytes(b, parser.ParseComments)
 	if err != nil {
-		log.Fatalf("Failed to parse '%s' YAML file: %v", channelsRKE2Filename, err)
+		zap.L().Sugar().Fatalf("Failed to parse '%s' YAML file: %v", channelsRKE2Filename, err)
 	}
 
 	if len(file.Docs) == 0 {
-		log.Fatalf("No Document Node found in '%s' YAML file: %v", channelsRKE2Filename, err)
+		zap.L().Sugar().Fatalf("No Document Node found in '%s' YAML file: %v", channelsRKE2Filename, err)
 	}
 
 	// If what I found is correct, YAML can be divided in docs, by using:
@@ -131,29 +140,29 @@ func main() {
 	}
 
 	var prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName string
-	//var lastReleaseVersionString string
+	var lastReleaseVersionString string
 
 	// Path to the 'releases' array itself
 	releasesPathString := "$.releases"
 	releasesArrPath, err := yaml.PathString(releasesPathString)
 	if err != nil {
-		log.Fatalf("Failed to create path for '%s': %v", releasesPathString, err)
+		zap.L().Sugar().Fatalf("Failed to create path for '%s': %v", releasesPathString, err)
 	}
 
 	releasesNodeInterface, err := releasesArrPath.ReadNode(docBody)
 	if err != nil {
-		log.Fatalf("Failed to read '%s' node: %v", releasesPathString, err)
+		zap.L().Sugar().Fatalf("Failed to read '%s' node: %v", releasesPathString, err)
 	}
 
 	releasesSeqNode, ok := releasesNodeInterface.(*ast.SequenceNode)
 	if !ok {
-		log.Fatalf("Node at '%s' is not a sequence (array) as expected.", releasesPathString)
+		zap.L().Sugar().Fatalf("Node at '%s' is not a sequence (array) as expected.", releasesPathString)
 	}
 
 	if len(releasesSeqNode.Values) == 0 {
 		// Handle the case where the releases array might be empty,
 		// though your YAML structure implies it won't be.
-		log.Fatal("'releases' array is empty. Cannot determine the last release to base the new one on.")
+		zap.L().Sugar().Fatal("'releases' array is empty. Cannot determine the last release to base the new one on.")
 	}
 
 	// Get the last element from the sequence
@@ -161,37 +170,42 @@ func main() {
 	// Ensure the last element is a MappingNode (a map)
 	lastReleaseMap, ok := lastReleaseNode.(*ast.MappingNode)
 	if !ok {
-		log.Fatalf("The last element in the 'releases' array is not a YAML map as expected.")
+		zap.L().Sugar().Fatalf("The last element in the 'releases' array is not a YAML map as expected.")
 	}
 
 	// Now, iterate through the key-value pairs of the lastReleaseMap
-	for _, valNode := range lastReleaseMap.Values {
-		keyNode, ok := valNode.Key.(*ast.StringNode)
+	for _, mvNode := range lastReleaseMap.Values {
+		keyNode, ok := mvNode.Key.(*ast.StringNode)
 		if !ok {
 			continue
 		}
 		switch keyNode.Value {
+		case "version": // Also capture version for context in logs
+			if v, ok := mvNode.Value.(*ast.StringNode); ok {
+				lastReleaseVersionString = v.Value
+			}
 		case "minChannelServerVersion":
-			if v, ok := valNode.Value.(*ast.StringNode); ok {
+			if v, ok := mvNode.Value.(*ast.StringNode); ok {
 				prevMinChannelServerVersion = v.Value
 			}
 		case "maxChannelServerVersion":
-			if v, ok := valNode.Value.(*ast.StringNode); ok {
+			if v, ok := mvNode.Value.(*ast.StringNode); ok {
 				prevMaxChannelServerVersion = v.Value
 			}
 		case "serverArgs":
-			if anchorNode, ok := valNode.Value.(*ast.AnchorNode); ok {
+			zap.L().Sugar().Infof("DEBUG: Processing 'serverArgs' for release '%s'. mvNode.Value (the value of serverArgs) type is: %T", lastReleaseVersionString, mvNode.Value)
+			if anchorNode, ok := mvNode.Value.(*ast.AnchorNode); ok {
 				if nameNode, ok := anchorNode.Name.(*ast.StringNode); ok {
 					baseServerArgsAnchorName = nameNode.Value
 				} else {
-					log.Printf("Warning: 'serverArgs' in the last release was not directly an ast.AnchorNode. Its type is %T. No base anchor name retrieved for merging.", valNode.Value)
+					zap.L().Sugar().Warnf("'serverArgs' in the last release was not directly an ast.AnchorNode. Its type is %T. No base anchor name retrieved for merging.", mvNode.Value)
 				}
 			}
 		}
 	}
 
 	if prevMinChannelServerVersion == "" || prevMaxChannelServerVersion == "" || baseServerArgsAnchorName == "" {
-		log.Fatalf("Could not extract all required fields (minChannelServerVersion, maxChannelServerVersion, serverArgs anchor) from the last release. Last release values found: min='%s', max='%s', anchor='%s'", prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName)
+		zap.L().Sugar().Fatalf("Could not extract all required fields (minChannelServerVersion, maxChannelServerVersion, serverArgs anchor) from the last release. Last release values found: min='%s', max='%s', anchor='%s'", prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName)
 	}
 
 	fmt.Printf("Based on previous release: minChannelServerVersion=%s, maxChannelServerVersion=%s, serverArgs Anchor to merge=* %s\n",
@@ -242,14 +256,14 @@ func main() {
 	outputYAML := file.String()
 	err = os.WriteFile(channelsRKE2OutputFilename, []byte(outputYAML), 0644)
 	if err != nil {
-		log.Fatalf("Failed to write updated YAML: %v", err)
+		zap.L().Sugar().Fatalf("Failed to write updated YAML: %v", err)
 	}
 
 	fmt.Printf("Successfully added new release '%s'\n", newReleaseVersion)
 
 	//releasesPath, err := yaml.PathString(releasesPathString)
 	//if err != nil {
-	//log.Fatalf("Failed to create path for 'releases' array: %v", err)
+	//zap.L().Sugar().Fatalf("Failed to create path for 'releases' array: %v", err)
 	//}
 
 	//_ = github.NewClient(nil)
@@ -310,4 +324,13 @@ func getMajorMinor(v string) string {
 		return fmt.Sprintf("%s.%s", strs[0], strs[1])
 	}
 	panic("version invalid: " + v)
+}
+
+func pp(v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(b))
+	return nil
 }
