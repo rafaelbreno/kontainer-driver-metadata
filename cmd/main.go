@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
+	"github.com/goccy/go-yaml/token"
 )
 
 type (
@@ -99,21 +100,21 @@ func main() {
 	// Something that we don't have in `channels-rke2.yaml`,
 	// so we can just assume:
 	docBody := file.Docs[0].Body
-	//releaseToInsert := Release{
-	//minChannelServerVersion: "v2.11.0-alpha1",
-	//maxChannelServerVersion: "v2.11.99",
-	//Version:                 "v1.32.6+rke2r1-GENERATED",
-	//Charts: map[string]Chart{
-	//"rke2-cilium": {
-	//Repo:    "rancher-rke2-charts",
-	//Version: "1.18.000-GENERATED",
-	//},
-	//"rke2-canal": {
-	//Repo:    "rancher-rke2-charts",
-	//Version: "v3.30.0-GENERATED",
-	//},
-	//},
-	//}
+	releaseToInsert := Release{
+		minChannelServerVersion: "v2.11.0-alpha1",
+		maxChannelServerVersion: "v2.11.99",
+		Version:                 "v1.32.6+rke2r1-GENERATED",
+		Charts: map[string]Chart{
+			"rke2-cilium": {
+				Repo:    "rancher-rke2-charts",
+				Version: "1.18.000-GENERATED",
+			},
+			"rke2-canal": {
+				Repo:    "rancher-rke2-charts",
+				Version: "v3.30.0-GENERATED",
+			},
+		},
+	}
 
 	var prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName string
 
@@ -182,7 +183,51 @@ func main() {
 	fmt.Printf("Based on previous release: minChannelServerVersion=%s, maxChannelServerVersion=%s, serverArgs Anchor to merge=* %s\n",
 		prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName)
 
-	fmt.Println("Aloo", prevReleasePath.String())
+	//fmt.Println("Aloo", prevReleasePath.String())
+
+	newReleaseValues := []*ast.MappingValueNode{}
+
+	serverArgsContentValues := []*ast.MappingValueNode{}
+	serverArgsContentValues = append(serverArgsContentValues, &ast.MappingValueNode{
+		Key: &ast.MergeKeyNode{},
+		Value: &ast.AliasNode{
+			Value: createStringNode(baseServerArgsAnchorName),
+		},
+	})
+
+	for chartName, chartDetails := range releaseToInsert.Charts {
+		serverArgsContentValues = append(
+			serverArgsContentValues,
+			createMappingValue(chartName, createChartMapNode(chartDetails.Repo, chartDetails.Repo)),
+		)
+	}
+
+	actualNewServerArgsMap := &ast.MappingNode{
+		Values: serverArgsContentValues,
+	}
+
+	newServerArgsAnchorNode := &ast.AnchorNode{
+		Name:  createStringNode("aaaaaaaaa"),
+		Value: actualNewServerArgsMap,
+	}
+
+	newReleaseValues = append(newReleaseValues, createMappingValue("serverArgs", newServerArgsAnchorNode))
+
+	newReleaseNode := &ast.MappingNode{
+		Values: newReleaseValues,
+	}
+
+	// --- 6. Insert the New Release Node into the 'releases' Array ---
+	releasesPath, err := yaml.PathString(releasesPathString)
+	if err != nil {
+		log.Fatalf("Failed to create path for 'releases' array: %v", err)
+	}
+
+	//The Insert function modifies the AST pointed to by docBody using the releasesPath.
+	err = releasesPath.Insert(docBody, newReleaseNode)
+	if err != nil {
+		log.Fatalf("Failed to insert new release node into AST: %v", err)
+	}
 
 	//_ = github.NewClient(nil)
 	//b, err := os.ReadFile(channelsRKE2Filename)
@@ -209,6 +254,31 @@ func main() {
 	//}
 	//fmt.Println(string(b))
 	//}
+}
+
+// Helper function to create an ast.StringNode.
+func createStringNode(value string) *ast.StringNode {
+	stringToken := token.String(value, token.DoubleQuoteType.String(), nil)
+	//return ast.String(token.String(value, token.DoubleQuoteStyle), value)
+	return ast.String(stringToken)
+}
+
+// Helper function to create an ast.MappingValueNode (a key-value pair in a map).
+func createMappingValue(keyName string, valueNode ast.Node) *ast.MappingValueNode {
+	return &ast.MappingValueNode{
+		Key:   createStringNode(keyName),
+		Value: valueNode,
+	}
+}
+
+// Helper function to create a simple chart mapping node.
+func createChartMapNode(repo, version string) *ast.MappingNode {
+	return &ast.MappingNode{
+		Values: []*ast.MappingValueNode{
+			createMappingValue("repo", createStringNode(repo)),
+			createMappingValue("version", createStringNode(version)),
+		},
+	}
 }
 
 func getMajorMinor(v string) string {
