@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -140,6 +141,7 @@ func main() {
 	}
 
 	var prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName string
+	var baseChartsAnchorName string
 	var lastReleaseVersionString string
 
 	// Path to the 'releases' array itself
@@ -192,14 +194,52 @@ func main() {
 			if v, ok := mvNode.Value.(*ast.StringNode); ok {
 				prevMaxChannelServerVersion = v.Value
 			}
+		case "charts": // We need the anchor name of the 'charts' block from the last release
+			log.Printf("DEBUG: Processing 'charts' for release '%s'. mvNode.Value type is %T", lastReleaseVersionString, mvNode.Value)
+			if anchorNode, ok := mvNode.Value.(*ast.AnchorNode); ok {
+				log.Printf("DEBUG: 'charts' IS an ast.AnchorNode.")
+				if anchorNode.Name != nil {
+					log.Printf("DEBUG: anchorNode.Name (charts anchor name node) type is: %T", anchorNode.Name)
+					if nameAsStrNode, ok := anchorNode.Name.(*ast.StringNode); ok {
+						if nameAsStrNode.Value != "" {
+							baseChartsAnchorName = nameAsStrNode.Value
+							log.Printf("DEBUG: Extracted baseChartsAnchorName: '%s'", baseChartsAnchorName)
+						} else {
+							log.Printf("DEBUG: charts AnchorNode.Name is StringNode, but its Value is empty.")
+						}
+					} else {
+						log.Printf("DEBUG: charts AnchorNode.Name is NOT a StringNode. Actual type: %T.", anchorNode.Name)
+					}
+				} else {
+					log.Printf("DEBUG: charts AnchorNode.Name is nil.")
+				}
+			} else {
+				log.Printf("WARNING: 'charts' in release '%s' is NOT an ast.AnchorNode. Type is %T.", lastReleaseVersionString, mvNode.Value)
+			}
 		case "serverArgs":
 			zap.L().Sugar().Infof("DEBUG: Processing 'serverArgs' for release '%s'. mvNode.Value (the value of serverArgs) type is: %T", lastReleaseVersionString, mvNode.Value)
+			// In v1.17.1, an anchored node is an *ast.AnchorNode whose .Value is the actual node.
 			if anchorNode, ok := mvNode.Value.(*ast.AnchorNode); ok {
-				if nameNode, ok := anchorNode.Name.(*ast.StringNode); ok {
-					baseServerArgsAnchorName = nameNode.Value
+				zap.L().Sugar().Infof("DEBUG: 'serverArgs' IS an ast.AnchorNode.")
+				if anchorNode.Name != nil {
+					zap.L().Sugar().Infof("DEBUG: anchorNode.Name is not nil. Its type is: %T", anchorNode.Name)
+					if nameAsStrNode, ok := anchorNode.Name.(*ast.StringNode); ok {
+						zap.L().Sugar().Infof("DEBUG: anchorNode.Name IS a StringNode. Value: '%s'", nameAsStrNode.Value)
+						if nameAsStrNode.Value != "" {
+							baseServerArgsAnchorName = nameAsStrNode.Value
+							zap.L().Sugar().Infof("DEBUG: Successfully extracted baseServerArgsAnchorName: '%s'", baseServerArgsAnchorName)
+						} else {
+							zap.L().Sugar().Infof("DEBUG: anchorNode.Name is a StringNode, but its Value is empty.")
+						}
+					} else {
+						zap.L().Sugar().Infof("DEBUG: anchorNode.Name for serverArgs is NOT a StringNode. Actual type: %T. Cannot extract anchor name with current logic.", anchorNode.Name)
+					}
 				} else {
-					zap.L().Sugar().Warnf("'serverArgs' in the last release was not directly an ast.AnchorNode. Its type is %T. No base anchor name retrieved for merging.", mvNode.Value)
+					zap.L().Sugar().Infof("DEBUG: anchorNode.Name is nil for 'serverArgs'.")
 				}
+			} else {
+				// This block will execute if mvNode.Value is not an *ast.AnchorNode
+				log.Printf("WARNING: 'serverArgs' in release '%s' is NOT an ast.AnchorNode. Type is %T. No base anchor name retrieved for merging.", lastReleaseVersionString, mvNode.Value)
 			}
 		}
 	}
