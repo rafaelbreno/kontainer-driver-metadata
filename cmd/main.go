@@ -1,188 +1,95 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"regexp"
-	"strings"
+	"strings" // Added for strings.Contains
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
-	"go.uber.org/zap"
 )
 
-type (
-	ChannelsRKE2 struct {
-		Channels    []Channel `yaml:"channels"`
-		AppDefaults []App     `yaml:"appDefaults"`
-		Releases    []Release `yaml:"releases"`
-	}
-
-	Channel struct {
-		Name   string `yaml:"name"`
-		Latest string `yaml:"latest"`
-	}
-
-	App struct {
-		AppName  string    `yaml:"appName"`
-		Defaults []Default `yaml:"defaults"`
-	}
-	Default struct {
-		AppVersion     string `yaml:"appVersion"`
-		DefaultVersion string `yaml:"defaultVersion"`
-	}
-
-	Release struct {
-		Version                 string `yaml:"version"`
-		minChannelServerVersion string `yaml:"minChannelServerVersion"`
-		maxChannelServerVersion string `yaml:"maxChannelServerVersion"`
-		//ServerArgs              any    `yaml:"serverArgs"`
-		Charts map[string]Chart `yaml:"charts"`
-	}
-
-	Chart struct {
-		Repo    string `yaml:"repo"`
-		Version string `yaml:"version"`
-	}
-)
-
-func (r Release) SanitizeVersion() string {
-	regexStr := `[^a-zA-Z0-9_-]`
-	re, err := regexp.Compile(regexStr)
-	if err != nil {
-		zap.L().Sugar().Fatalf("Failed to parse regex string '%s': %v", regexStr, err)
-	}
-	return re.ReplaceAllString(r.Version, "-")
-
+// ... (keep your helper functions: createStringNode, createMappingValue, createChartMapNode)
+func createStringNode(value string) *ast.StringNode {
+	stringToken := token.String(value, token.DoubleQuoteType.String(), nil)
+	return ast.String(stringToken)
 }
 
-func SanitizeVersion(v string) string {
-	regexStr := `[^a-zA-Z0-9_-]`
-	re, err := regexp.Compile(regexStr)
-	if err != nil {
-		zap.L().Sugar().Fatalf("Failed to parse regex string '%s': %v", regexStr, err)
+func createMappingValue(keyName string, valueNode ast.Node) *ast.MappingValueNode {
+	return &ast.MappingValueNode{
+		Key:   createStringNode(keyName),
+		Value: valueNode,
 	}
-	return re.ReplaceAllString(v, "-")
 }
 
-func (r Release) ServerArgsAnchorName() string {
-	return "serverArgs-" + r.SanitizeVersion()
-}
-
-func (r Release) AgentArgsAnchorName() string {
-	return "agentArgs-" + r.SanitizeVersion()
-}
-
-func (r Release) ChartsAnchorName() string {
-	return "charts-" + r.SanitizeVersion()
-}
-
-const (
-	channelsRKE2Filename       = "channels-rke2.yaml"
-	channelsRKE2OutputFilename = "channels-rke2.output.yaml"
-	channelsK3sFilename        = "channels.yaml"
-)
-
-var (
-	releasesMap             map[string]map[string]Release = make(map[string]map[string]Release)
-	majorMinorCurrentCharts map[string]map[string]string  = make(map[string]map[string]string)
-)
-
-func main() {
-	logger, err := zap.NewDevelopment()
-	if err != nil {
-		zap.L().Sugar().Fatalf("Failed to initialize logger: %v", err)
-	}
-	defer logger.Sync()
-
-	zap.ReplaceGlobals(logger)
-
-	b, err := os.ReadFile(channelsRKE2Filename)
-	if err != nil {
-		zap.L().Sugar().Fatalf("Failed to read '%s' file: %v", channelsRKE2Filename, err)
-	}
-
-	file, err := parser.ParseBytes(b, parser.ParseComments)
-	if err != nil {
-		zap.L().Sugar().Fatalf("Failed to parse '%s' YAML file: %v", channelsRKE2Filename, err)
-	}
-
-	if len(file.Docs) == 0 {
-		zap.L().Sugar().Fatalf("No Document Node found in '%s' YAML file: %v", channelsRKE2Filename, err)
-	}
-
-	// If what I found is correct, YAML can be divided in docs, by using:
-	// "----"
-	// Something that we don't have in `channels-rke2.yaml`,
-	// so we can just assume:
-	docBody := file.Docs[0].Body
-
-	newReleaseVersion := "v1.32.5+rke2r1"
-	newServerArgsAnchorName := "serverArgs-" + SanitizeVersion(newReleaseVersion)
-
-	releaseToInsert := Release{
-		minChannelServerVersion: "v2.11.0-alpha1",
-		maxChannelServerVersion: "v2.11.99",
-		Version:                 "v1.32.6+rke2r1-GENERATED",
-		Charts: map[string]Chart{
-			"rke2-cilium": {
-				Repo:    "rancher-rke2-charts",
-				Version: "1.18.000-GENERATED",
-			},
-			"rke2-canal": {
-				Repo:    "rancher-rke2-charts",
-				Version: "v3.30.0-GENERATED",
-			},
+func createChartMapNode(repo, version string) *ast.MappingNode {
+	return &ast.MappingNode{
+		Values: []*ast.MappingValueNode{
+			createMappingValue("repo", createStringNode(repo)),
+			createMappingValue("version", createStringNode(version)),
 		},
 	}
+}
 
-	var prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName string
-	var baseChartsAnchorName string
+func main() {
+	inputFile := "channels-rke2.yaml"
+	outputFile := "channels-rke2.output.yaml"
+
+	yamlBytes, err := os.ReadFile(inputFile)
+	if err != nil {
+		log.Fatalf("Failed to read YAML file %s: %v", inputFile, err)
+	}
+
+	file, err := parser.ParseBytes(yamlBytes, parser.ParseComments)
+	if err != nil {
+		log.Fatalf("Failed to parse YAML: %v", err)
+	}
+	if len(file.Docs) == 0 {
+		log.Fatal("No documents found in YAML file")
+	}
+	docBody := file.Docs[0].Body
+
+	newReleaseVersion := "v1.21.6+rke2r1"
+	newServerArgsAnchorName := "serverArgs-" + newReleaseVersion
+	newChartsAnchorName := "charts-" + newReleaseVersion
+	chartsToUpdateInNewRelease := map[string]map[string]string{
+		"rke2-cilium": {"repo": "rancher-rke2-charts", "version": "1.19.000"},
+		"rke2-canal":  {"repo": "rancher-rke2-charts", "version": "v3.31.0"},
+	}
+
+	var prevMinChannelServerVersion, prevMaxChannelServerVersion, baseChartsAnchorName string
 	var lastReleaseVersionString string
 
-	// Path to the 'releases' array itself
-	releasesPathString := "$.releases"
-	releasesArrPath, err := yaml.PathString(releasesPathString)
+	releasesArrPathString := "$.releases"
+	releasesArrPath, err := yaml.PathString(releasesArrPathString)
 	if err != nil {
-		zap.L().Sugar().Fatalf("Failed to create path for '%s': %v", releasesPathString, err)
+		log.Fatalf("Failed to create path for '%s': %v", releasesArrPathString, err)
 	}
-
 	releasesNodeInterface, err := releasesArrPath.ReadNode(docBody)
 	if err != nil {
-		zap.L().Sugar().Fatalf("Failed to read '%s' node: %v", releasesPathString, err)
+		log.Fatalf("Failed to read node at path '%s': %v", releasesArrPathString, err)
 	}
-
 	releasesSeqNode, ok := releasesNodeInterface.(*ast.SequenceNode)
 	if !ok {
-		zap.L().Sugar().Fatalf("Node at '%s' is not a sequence (array) as expected.", releasesPathString)
+		log.Fatalf("Node at path '%s' is not a sequence. Got: %T", releasesArrPathString, releasesNodeInterface)
 	}
-
 	if len(releasesSeqNode.Values) == 0 {
-		// Handle the case where the releases array might be empty,
-		// though your YAML structure implies it won't be.
-		zap.L().Sugar().Fatal("'releases' array is empty. Cannot determine the last release to base the new one on.")
+		log.Fatal("'releases' array is empty.")
 	}
-
-	// Get the last element from the sequence
 	lastReleaseNode := releasesSeqNode.Values[len(releasesSeqNode.Values)-1]
-	// Ensure the last element is a MappingNode (a map)
 	lastReleaseMap, ok := lastReleaseNode.(*ast.MappingNode)
 	if !ok {
-		zap.L().Sugar().Fatalf("The last element in the 'releases' array is not a YAML map as expected.")
+		log.Fatalf("Last element in 'releases' is not a map.")
 	}
 
-	// Now, iterate through the key-value pairs of the lastReleaseMap
 	for _, mvNode := range lastReleaseMap.Values {
-		keyNode, ok := mvNode.Key.(*ast.StringNode)
-		if !ok {
-			continue
-		}
-		switch keyNode.Value {
-		case "version": // Also capture version for context in logs
+		keyNode, _ := mvNode.Key.(*ast.StringNode)
+		currentKeyName := keyNode.Value
+		switch currentKeyName {
+		case "version":
 			if v, ok := mvNode.Value.(*ast.StringNode); ok {
 				lastReleaseVersionString = v.Value
 			}
@@ -194,183 +101,85 @@ func main() {
 			if v, ok := mvNode.Value.(*ast.StringNode); ok {
 				prevMaxChannelServerVersion = v.Value
 			}
-		case "charts": // We need the anchor name of the 'charts' block from the last release
-			log.Printf("DEBUG: Processing 'charts' for release '%s'. mvNode.Value type is %T", lastReleaseVersionString, mvNode.Value)
+		case "charts":
 			if anchorNode, ok := mvNode.Value.(*ast.AnchorNode); ok {
-				log.Printf("DEBUG: 'charts' IS an ast.AnchorNode.")
-				if anchorNode.Name != nil {
-					log.Printf("DEBUG: anchorNode.Name (charts anchor name node) type is: %T", anchorNode.Name)
-					if nameAsStrNode, ok := anchorNode.Name.(*ast.StringNode); ok {
-						if nameAsStrNode.Value != "" {
-							baseChartsAnchorName = nameAsStrNode.Value
-							log.Printf("DEBUG: Extracted baseChartsAnchorName: '%s'", baseChartsAnchorName)
-						} else {
-							log.Printf("DEBUG: charts AnchorNode.Name is StringNode, but its Value is empty.")
-						}
-					} else {
-						log.Printf("DEBUG: charts AnchorNode.Name is NOT a StringNode. Actual type: %T.", anchorNode.Name)
-					}
-				} else {
-					log.Printf("DEBUG: charts AnchorNode.Name is nil.")
+				if nameNode, ok := anchorNode.Name.(*ast.StringNode); ok && nameNode.Value != "" {
+					baseChartsAnchorName = nameNode.Value
+					log.Printf("DEBUG: Extracted baseChartsAnchorName: '%s'", baseChartsAnchorName)
 				}
 			} else {
-				log.Printf("WARNING: 'charts' in release '%s' is NOT an ast.AnchorNode. Type is %T.", lastReleaseVersionString, mvNode.Value)
-			}
-		case "serverArgs":
-			zap.L().Sugar().Infof("DEBUG: Processing 'serverArgs' for release '%s'. mvNode.Value (the value of serverArgs) type is: %T", lastReleaseVersionString, mvNode.Value)
-			// In v1.17.1, an anchored node is an *ast.AnchorNode whose .Value is the actual node.
-			if anchorNode, ok := mvNode.Value.(*ast.AnchorNode); ok {
-				zap.L().Sugar().Infof("DEBUG: 'serverArgs' IS an ast.AnchorNode.")
-				if anchorNode.Name != nil {
-					zap.L().Sugar().Infof("DEBUG: anchorNode.Name is not nil. Its type is: %T", anchorNode.Name)
-					if nameAsStrNode, ok := anchorNode.Name.(*ast.StringNode); ok {
-						zap.L().Sugar().Infof("DEBUG: anchorNode.Name IS a StringNode. Value: '%s'", nameAsStrNode.Value)
-						if nameAsStrNode.Value != "" {
-							baseServerArgsAnchorName = nameAsStrNode.Value
-							zap.L().Sugar().Infof("DEBUG: Successfully extracted baseServerArgsAnchorName: '%s'", baseServerArgsAnchorName)
-						} else {
-							zap.L().Sugar().Infof("DEBUG: anchorNode.Name is a StringNode, but its Value is empty.")
-						}
-					} else {
-						zap.L().Sugar().Infof("DEBUG: anchorNode.Name for serverArgs is NOT a StringNode. Actual type: %T. Cannot extract anchor name with current logic.", anchorNode.Name)
-					}
-				} else {
-					zap.L().Sugar().Infof("DEBUG: anchorNode.Name is nil for 'serverArgs'.")
-				}
-			} else {
-				// This block will execute if mvNode.Value is not an *ast.AnchorNode
-				log.Printf("WARNING: 'serverArgs' in release '%s' is NOT an ast.AnchorNode. Type is %T. No base anchor name retrieved for merging.", lastReleaseVersionString, mvNode.Value)
+				log.Printf("WARNING: 'charts' in release '%s' is NOT an ast.AnchorNode. Type: %T.", lastReleaseVersionString, mvNode.Value)
 			}
 		}
 	}
 
-	if prevMinChannelServerVersion == "" || prevMaxChannelServerVersion == "" || baseServerArgsAnchorName == "" {
-		zap.L().Sugar().Fatalf("Could not extract all required fields (minChannelServerVersion, maxChannelServerVersion, serverArgs anchor) from the last release. Last release values found: min='%s', max='%s', anchor='%s'", prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName)
+	if prevMinChannelServerVersion == "" || prevMaxChannelServerVersion == "" || baseChartsAnchorName == "" {
+		log.Fatalf("Could not extract required fields. min='%s', max='%s', baseChartsAnchor='%s'", prevMinChannelServerVersion, prevMaxChannelServerVersion, baseChartsAnchorName)
 	}
+	fmt.Printf("Based on previous release ('%s'): minChannel=%s, maxChannel=%s, Charts Anchor to merge=* %s\n", lastReleaseVersionString, prevMinChannelServerVersion, prevMaxChannelServerVersion, baseChartsAnchorName)
 
-	fmt.Printf("Based on previous release: minChannelServerVersion=%s, maxChannelServerVersion=%s, serverArgs Anchor to merge=* %s\n",
-		prevMinChannelServerVersion, prevMaxChannelServerVersion, baseServerArgsAnchorName)
-
-	//fmt.Println("Aloo", prevReleasePath.String())
-
-	newReleaseValues := []*ast.MappingValueNode{}
-	newReleaseValues = append(newReleaseValues, createMappingValue("version", createStringNode(newReleaseVersion)))
-	newReleaseValues = append(newReleaseValues, createMappingValue("minChannelServerVersion", createStringNode(prevMinChannelServerVersion)))
-	newReleaseValues = append(newReleaseValues, createMappingValue("maxChannelServerVersion", createStringNode(prevMaxChannelServerVersion)))
-
-	serverArgsContentValues := []*ast.MappingValueNode{}
-	serverArgsContentValues = append(serverArgsContentValues, &ast.MappingValueNode{
-		Key: &ast.MergeKeyNode{},
-		Value: &ast.AliasNode{
-			Value: createStringNode(baseServerArgsAnchorName),
-		},
-	})
-
-	for chartName, chartDetails := range releaseToInsert.Charts {
-		serverArgsContentValues = append(
-			serverArgsContentValues,
-			createMappingValue(chartName, createChartMapNode(chartDetails.Repo, chartDetails.Repo)),
-		)
+	newReleaseValues := []*ast.MappingValueNode{
+		createMappingValue("version", createStringNode(newReleaseVersion)),
+		createMappingValue("minChannelServerVersion", createStringNode(prevMinChannelServerVersion)),
+		createMappingValue("maxChannelServerVersion", createStringNode(prevMaxChannelServerVersion)),
+		createMappingValue("serverArgs", &ast.AnchorNode{Name: createStringNode(newServerArgsAnchorName), Value: &ast.MappingNode{}}),
 	}
-
-	actualNewServerArgsMap := &ast.MappingNode{
-		Values: serverArgsContentValues,
+	chartsContentValues := []*ast.MappingValueNode{
+		{Key: &ast.MergeKeyNode{}, Value: &ast.AliasNode{Value: createStringNode(baseChartsAnchorName)}},
 	}
-
-	newServerArgsAnchorNode := &ast.AnchorNode{
-		Name:  createStringNode(newServerArgsAnchorName),
-		Value: actualNewServerArgsMap,
+	for name, details := range chartsToUpdateInNewRelease {
+		chartsContentValues = append(chartsContentValues, createMappingValue(name, createChartMapNode(details["repo"], details["version"])))
 	}
+	newReleaseValues = append(newReleaseValues, createMappingValue("charts", &ast.AnchorNode{Name: createStringNode(newChartsAnchorName), Value: &ast.MappingNode{Values: chartsContentValues}}))
+	newReleaseNode := &ast.MappingNode{Values: newReleaseValues}
 
-	newReleaseValues = append(newReleaseValues, createMappingValue("serverArgs", newServerArgsAnchorNode))
-
-	newReleaseNode := &ast.MappingNode{
-		Values: newReleaseValues,
-	}
-
-	// --- 6. Insert the New Release Node into the 'releases' Array ---
+	// --- 6. Modify the AST ---
+	originalCount := len(releasesSeqNode.Values)
 	releasesSeqNode.Values = append(releasesSeqNode.Values, newReleaseNode)
+	log.Printf("DEBUG: Appended new release. Original count: %d, New count: %d", originalCount, len(releasesSeqNode.Values))
+	// (In-memory check logs - keep them if you want, they should still pass)
+	if len(releasesSeqNode.Values) > originalCount {
+		lastAdded := releasesSeqNode.Values[len(releasesSeqNode.Values)-1].(*ast.MappingNode).Values[0].Value.(*ast.StringNode) // Quick check for version of last added
+		log.Printf("DEBUG: Version of the programmatically added node (read back from AST): '%s'", lastAdded.Value)
+		if lastAdded.Value == newReleaseVersion {
+			log.Printf("DEBUG: AST modification appears successful in memory.")
+		} else {
+			log.Printf("ERROR: Added node version mismatch!")
+		}
+	}
+
+	// --- Attempt to use ReplaceWithNode to "refresh" the releases sequence in the AST ---
+	log.Println("DEBUG: Attempting ReplaceWithNode on the 'releases' sequence with its modified self.")
+	err = releasesArrPath.ReplaceWithNode(file, releasesSeqNode) // releasesArrPath was "$.releases"
+	if err != nil {
+		// If ReplaceWithNode fails, log it but proceed to see if serialization works anyway
+		log.Printf("ERROR: ReplaceWithNode for 'releases' array failed: %v. Proceeding with serialization...", err)
+	} else {
+		log.Println("DEBUG: ReplaceWithNode completed.")
+	}
+	// --- End of ReplaceWithNode attempt ---
+
 	fmt.Printf("Prepared new release '%s' for inclusion in AST.\n", newReleaseVersion)
 
 	// --- 7. Serialize the Modified AST back to YAML ---
+	log.Println("DEBUG: About to call file.String() to serialize AST.")
+	docBodyYAML := docBody.String()
+	if strings.Contains(docBodyYAML, newReleaseVersion) {
+		log.Printf("IMPORTANT DEBUG: newReleaseVersion ('%s') IS PRESENT in direct docBody.String() output!", newReleaseVersion)
+	} else {
+		log.Printf("IMPORTANT DEBUG: newReleaseVersion ('%s') IS MISSING from direct docBody.String() output!", newReleaseVersion)
+	}
 	outputYAML := file.String()
-	err = os.WriteFile(channelsRKE2OutputFilename, []byte(outputYAML), 0644)
+	if strings.Contains(outputYAML, newReleaseVersion) {
+		log.Printf("DEBUG: newReleaseVersion ('%s') IS present in file.String() output.", newReleaseVersion)
+	} else {
+		log.Printf("DEBUG: newReleaseVersion ('%s') IS MISSING from file.String() output.", newReleaseVersion)
+	}
+
+	err = os.WriteFile(outputFile, []byte(outputYAML), 0644)
 	if err != nil {
-		zap.L().Sugar().Fatalf("Failed to write updated YAML: %v", err)
+		log.Fatalf("Failed to write updated YAML to %s: %v", outputFile, err)
 	}
-
-	fmt.Printf("Successfully added new release '%s'\n", newReleaseVersion)
-
-	//releasesPath, err := yaml.PathString(releasesPathString)
-	//if err != nil {
-	//zap.L().Sugar().Fatalf("Failed to create path for 'releases' array: %v", err)
-	//}
-
-	//_ = github.NewClient(nil)
-	//b, err := os.ReadFile(channelsRKE2Filename)
-	//if err != nil {
-	//panic(err)
-	//}
-
-	//var channels ChannelsRKE2
-
-	//if err := yaml.Unmarshal(b, &channels); err != nil {
-	//panic(err)
-	//}
-
-	//for _, release := range channels.Releases {
-	//majorMinor := getMajorMinor(release.Version)
-	//if _, ok := releasesMap[majorMinor]; !ok {
-	//releasesMap[majorMinor] = map[string]Release{}
-	//}
-
-	//releasesMap[majorMinor][release.Version] = release
-	//b, err := json.MarshalIndent(release.Charts, "", "	")
-	//if err != nil {
-	//panic(err)
-	//}
-	//fmt.Println(string(b))
-	//}
-}
-
-// Helper function to create an ast.StringNode.
-func createStringNode(value string) *ast.StringNode {
-	stringToken := token.String(value, token.DoubleQuoteType.String(), nil)
-	//return ast.String(token.String(value, token.DoubleQuoteStyle), value)
-	return ast.String(stringToken)
-}
-
-// Helper function to create an ast.MappingValueNode (a key-value pair in a map).
-func createMappingValue(keyName string, valueNode ast.Node) *ast.MappingValueNode {
-	return &ast.MappingValueNode{
-		Key:   createStringNode(keyName),
-		Value: valueNode,
-	}
-}
-
-// Helper function to create a simple chart mapping node.
-func createChartMapNode(repo, version string) *ast.MappingNode {
-	return &ast.MappingNode{
-		Values: []*ast.MappingValueNode{
-			createMappingValue("repo", createStringNode(repo)),
-			createMappingValue("version", createStringNode(version)),
-		},
-	}
-}
-
-func getMajorMinor(v string) string {
-	strs := strings.Split(v, ".")
-	if len(strs) > 2 {
-		return fmt.Sprintf("%s.%s", strs[0], strs[1])
-	}
-	panic("version invalid: " + v)
-}
-
-func pp(v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(b))
-	return nil
+	fmt.Printf("Successfully added new release '%s' and wrote to %s\n", newReleaseVersion, outputFile)
+	fmt.Printf("Review %s to see the changes.\n", outputFile)
 }
