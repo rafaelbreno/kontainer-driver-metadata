@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -195,6 +196,9 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to marshal YAML", zap.Error(err))
 	}
+
+	outputBytes = bytes.ReplaceAll(outputBytes, []byte("!!merge "), nil)
+	outputBytes = bytes.ReplaceAll(outputBytes, []byte(" {}"), nil)
 
 	err = os.WriteFile(outputFile, outputBytes, 0644)
 	if err != nil {
