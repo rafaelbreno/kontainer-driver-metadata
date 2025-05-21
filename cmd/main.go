@@ -3,14 +3,14 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
-	"go.uber.org/zap" // Uber Zap for logging
-	"gopkg.in/yaml.v3"
+	"go.uber.org/zap"
+	yaml "gopkg.in/yaml.v3"
 )
 
-// Global logger (or you can pass it around)
 var logger *zap.Logger
 
 // Helper to create a scalar YAML node (for keys or simple string values)
@@ -45,53 +45,79 @@ func strictlyAlphanumeric(input string) string {
 	return sb.String()
 }
 
-func main() {
-	// Initialize Zap logger
-	var initErr error
-	logger, initErr = zap.NewDevelopment() // Or zap.NewProduction()
-	if initErr != nil {
-		fmt.Printf("Failed to initialize zap logger: %v\n", initErr)
-		os.Exit(1)
-	}
-	defer logger.Sync() // Flushes buffer, if any
-
-	inputFile := "channels-rke2.yaml"
-	outputFile := "channels-rke2.output.yaml"
-
-	// --- 1. Read and Parse the YAML file ---
-	yamlBytes, err := os.ReadFile(inputFile)
+func readAndParseYaml(filename string) (yaml.Node, *yaml.Node, error) {
+	yamlBytes, err := os.ReadFile(filename)
 	if err != nil {
-		logger.Fatal("Failed to read YAML file", zap.String("file", inputFile), zap.Error(err))
+		logger.Error("Failed to read YAML file", zap.String("file", filename), zap.Error(err))
+		return yaml.Node{}, nil, err
 	}
 
 	var rootNode yaml.Node
 	err = yaml.Unmarshal(yamlBytes, &rootNode)
 	if err != nil {
-		logger.Fatal("Failed to unmarshal YAML", zap.Error(err))
+		logger.Error("Failed to unmarshal YAML", zap.Error(err))
+		return yaml.Node{}, nil, err
 	}
 
 	if rootNode.Kind != yaml.DocumentNode || len(rootNode.Content) == 0 {
-		logger.Fatal("Expected a YAML document node at the root.")
+		logger.Error("Expected a YAML document node at the root.")
+		return yaml.Node{}, nil, err
 	}
-	docContent := rootNode.Content[0]
 
-	// --- 2. Navigate to the 'releases' sequence ---
+	return rootNode, rootNode.Content[0], nil
+}
+
+func getReleaseSeqNode(doc *yaml.Node) (*yaml.Node, error) {
+	if doc == nil {
+		return nil, fmt.Errorf("Provided doc content is nil")
+	}
 	var releasesSeqNode *yaml.Node
-	if docContent.Kind == yaml.MappingNode {
-		for i := 0; i < len(docContent.Content); i += 2 {
-			keyNode := docContent.Content[i]
+	if doc.Kind == yaml.MappingNode {
+		// docContent.Content for a MappingNode is a flat list: [key1, value1, key2, value2, ...]
+		// so here we need to iterate like i+=2
+		for i := 0; i < len(doc.Content); i += 2 {
+			keyNode := doc.Content[i]
 			if keyNode.Kind == yaml.ScalarNode && keyNode.Value == "releases" {
-				releasesSeqNode = docContent.Content[i+1]
+				releasesSeqNode = doc.Content[i+1]
 				break
 			}
 		}
 	}
+
 	if releasesSeqNode == nil || releasesSeqNode.Kind != yaml.SequenceNode {
-		logger.Fatal("Could not find 'releases' sequence in YAML or it's not a sequence.")
+		return nil, fmt.Errorf("Could not find 'releases' sequence in YAML or it's not a sequence.")
 	}
 	if len(releasesSeqNode.Content) == 0 {
-		logger.Fatal("'releases' sequence is empty. Cannot determine the last release.")
+		return nil, fmt.Errorf("'releases' sequence is empty. Cannot determine the last release.")
 	}
+	return releasesSeqNode, nil
+}
+
+func main() {
+	// Initialize Zap logger
+	var initErr error
+	logger, initErr = zap.NewDevelopment()
+	if initErr != nil {
+		fmt.Printf("Failed to initialize zap logger: %v\n", initErr)
+		os.Exit(1)
+	}
+	defer logger.Sync()
+
+	inputFile := "channels-rke2.yaml"
+	outputFile := "channels-rke2.output.yaml"
+
+	// --- 1. Read and Parse the YAML file ---
+	rootNode, docContent, err := readAndParseYaml(inputFile)
+	if err != nil {
+		log.Fatal(
+			"Failed to read and parse file",
+			zap.String("filename", inputFile),
+			zap.Error(err),
+		)
+	}
+
+	// --- 2. Navigate to the 'releases' sequence ---
+	releasesSeqNode, err := getReleaseSeqNode(docContent)
 
 	// --- 3. Extract Information from the Last Existing Release ---
 	lastReleaseMapNode := releasesSeqNode.Content[len(releasesSeqNode.Content)-1]
