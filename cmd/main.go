@@ -311,13 +311,20 @@ func pp(v any) {
 	}
 	fmt.Println(string(b))
 }
+func dd(v any) {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		zap.L().Fatal("Error mashal", zap.Error(err))
+	}
+	fmt.Println(string(b))
+	os.Exit(1)
+}
 
 func getPreviousReleasePos(releaseNode *yaml.Node, version string) (int, error) {
 	//pp(*releaseNode)
 	//os.Exit(1)
 	for i := 0; i < len(releaseNode.Content); i++ {
 		node := releaseNode.Content[i]
-
 		if node.Kind == yaml.MappingNode {
 			for j := 0; j < len(node.Content); j += 2 {
 				keyNode := node.Content[j]
@@ -345,6 +352,7 @@ func getPreviousRelease(releaseNode *yaml.Node, version string) (int, Release, e
 	}
 	release := Release{}
 	node := releaseNode.Content[prevReleasePos]
+	//dd(node)
 
 	if node.Kind != yaml.MappingNode {
 		return 0, Release{}, fmt.Errorf("Not a mapping node in '%s' release", prevVersion)
@@ -406,8 +414,6 @@ func update(releaseNode *yaml.Node, newReleases ...Release) error {
 		var newReleaseContent []*yaml.Node
 
 		newReleaseContent = append(newReleaseContent, createScalarNode("version"), createScalarNode(newRelease.Version))
-		newReleaseContent = append(newReleaseContent, createScalarNode("minChannelServerVersion"), createScalarNode(newRelease.MinChannelServerVersion))
-		newReleaseContent = append(newReleaseContent, createScalarNode("maxChannelServerVersion"), createScalarNode(newRelease.MaxChannelServerVersion))
 
 		prevReleasePos, prevRelease, err := getPreviousRelease(releaseNode, newRelease.Version)
 		if err != nil {
@@ -418,6 +424,9 @@ func update(releaseNode *yaml.Node, newReleases ...Release) error {
 			)
 			return err
 		}
+
+		newReleaseContent = append(newReleaseContent, createScalarNode("minChannelServerVersion"), createScalarNode(prevRelease.MinChannelServerVersion))
+		newReleaseContent = append(newReleaseContent, createScalarNode("maxChannelServerVersion"), createScalarNode(prevRelease.MaxChannelServerVersion))
 
 		sanitizedVersionForAnchor := strictlyAlphanumeric(newRelease.Version) // e.g., "v1216rke2r1"
 
@@ -486,10 +495,6 @@ func update(releaseNode *yaml.Node, newReleases ...Release) error {
 		// appending the content
 
 		releaseNode.Content = slices.Insert(releaseNode.Content, prevReleasePos+1, newReleaseNode)
-		//updatedReleaseContent := append(releaseNode.Content[prevReleasePos+2:], newReleaseNode)
-		//updatedReleaseContent = append(updatedReleaseContent, releaseNode.Content[:prevReleasePos+2]...)
-
-		//releaseNode.Content = updatedReleaseContent
 	}
 
 	return nil
