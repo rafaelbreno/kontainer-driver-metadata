@@ -14,28 +14,63 @@ import (
 	yaml "gopkg.in/yaml.v3"
 )
 
+type (
+	RKE2Channels struct {
+		Releases []Release `yaml:"releases"`
+	}
+
+	Release struct {
+		Version                 string           `yaml:"version"`
+		MinChannelServerVersion string           `yaml:"minChannelServerVersion"`
+		MaxChannelServerVersion string           `yaml:"maxChannelServerVersion"`
+		ServerArgs              map[string]Arg   `yaml:"serverArgs"`
+		serverArgsAnchor        string           `yaml:"-"`
+		AgentArgs               map[string]Arg   `yaml:"agentArgs"`
+		agentArgsAnchor         string           `yaml:"-"`
+		Charts                  map[string]Chart `yaml:"charts"`
+		chartsAnchor            string           `yaml:"-"`
+	}
+
+	Arg struct {
+		Default  string   `yaml:"default"`
+		Type     string   `yaml:"type"`
+		Options  []string `yaml:"options"`
+		Nullable bool     `yaml:"nullable"`
+	}
+
+	Chart struct {
+		Repo    string `yaml:"repo"`
+		Version string `yaml:"version"`
+	}
+)
+
 var logger *zap.Logger
 
-func readAndParseYaml(filename string) (yaml.Node, *yaml.Node, error) {
+func readAndParseYaml(filename string) (*RKE2Channels, yaml.Node, *yaml.Node, error) {
 	yamlBytes, err := os.ReadFile(filename)
 	if err != nil {
 		logger.Error("Failed to read YAML file", zap.String("file", filename), zap.Error(err))
-		return yaml.Node{}, nil, err
+		return nil, yaml.Node{}, nil, err
+	}
+	var rke2channels RKE2Channels
+	if err = yaml.Unmarshal(yamlBytes, &rke2channels); err != nil {
+		logger.Error("Failed to unmarshal YAML", zap.Error(err))
+		return nil, yaml.Node{}, nil, err
 	}
 
 	var rootNode yaml.Node
 	err = yaml.Unmarshal(yamlBytes, &rootNode)
 	if err != nil {
 		logger.Error("Failed to unmarshal YAML", zap.Error(err))
-		return yaml.Node{}, nil, err
+		return nil, yaml.Node{}, nil, err
 	}
 
 	if rootNode.Kind != yaml.DocumentNode || len(rootNode.Content) == 0 {
 		logger.Error("Expected a YAML document node at the root.")
-		return yaml.Node{}, nil, err
+		return nil, yaml.Node{}, nil, err
 	}
 
-	return rootNode, rootNode.Content[0], nil
+	return &rke2channels, rootNode, rootNode.Content[0], nil
 }
 
 func getReleaseSeqNode(doc *yaml.Node) (*yaml.Node, error) {
@@ -64,7 +99,21 @@ func getReleaseSeqNode(doc *yaml.Node) (*yaml.Node, error) {
 	return releasesSeqNode, nil
 }
 
+const (
+	inputFile  = "channels-rke2.yaml"
+	outputFile = "channels-rke2.output.yaml"
+)
+
+func getUpdatedCharts(version string) map[string]string {
+	prevVersion := getPreviousVersion(version)
+	fmt.Println(prevVersion)
+
+	return nil
+}
+
 func main() {
+	charts := getUpdatedCharts("v1.30.13+rke2r1")
+	dd(charts)
 	// Initialize Zap logger
 	var initErr error
 	logger, initErr = zap.NewDevelopment()
@@ -75,11 +124,8 @@ func main() {
 	zap.ReplaceGlobals(logger)
 	defer logger.Sync()
 
-	inputFile := "channels-rke2.yaml"
-	outputFile := "channels-rke2.output.yaml"
-
 	// --- 1. Read and Parse the YAML file ---
-	rootNode, docContent, err := readAndParseYaml(inputFile)
+	_, rootNode, docContent, err := readAndParseYaml(inputFile)
 	if err != nil {
 		log.Fatal(
 			"Failed to read and parse file",
@@ -138,32 +184,6 @@ func main() {
 		logger.Fatal("Failed to write updated YAML to file", zap.String("file", outputFile), zap.Error(err))
 	}
 }
-
-type (
-	Release struct {
-		Version                 string           `yaml:"version"`
-		MinChannelServerVersion string           `yaml:"minChannelServerVersion"`
-		MaxChannelServerVersion string           `yaml:"maxChannelServerVersion"`
-		ServerArgs              map[string]Arg   `yaml:"serverArgs"`
-		serverArgsAnchor        string           `yaml:"-"`
-		AgentArgs               map[string]Arg   `yaml:"agentArgs"`
-		agentArgsAnchor         string           `yaml:"-"`
-		Charts                  map[string]Chart `yaml:"charts"`
-		chartsAnchor            string           `yaml:"-"`
-	}
-
-	Arg struct {
-		Default  string   `yaml:"default"`
-		Type     string   `yaml:"type"`
-		Options  []string `yaml:"options"`
-		Nullable bool     `yaml:"nullable"`
-	}
-
-	Chart struct {
-		Repo    string `yaml:"repo"`
-		Version string `yaml:"version"`
-	}
-)
 
 func getPreviousVersion(version string) string {
 	// TODO:
