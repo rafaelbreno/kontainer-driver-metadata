@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"slices"
 	"strconv"
@@ -104,16 +106,84 @@ const (
 	outputFile = "channels-rke2.output.yaml"
 )
 
-func getUpdatedCharts(version string) map[string]string {
-	prevVersion := getPreviousVersion(version)
-	fmt.Println(prevVersion)
+type ChartsFile struct {
+	Charts []struct {
+		Version  string `yaml:"version"`
+		Filename string `yaml:"filename"`
+	}
+}
 
-	return nil
+func getCharts(version string) map[string]Chart {
+	prevVersion := getPreviousVersion(version)
+
+	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/rancher/rke2/%s/%s", prevVersion, "charts/chart_versions.yaml")
+	zap.L().Info("Attempting to fetch file from GitHub",
+		zap.String("url", rawURL))
+
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		zap.L().Fatal("Failed to make HTTP GET request",
+			zap.Error(err))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errorBodyBytes, readErr := io.ReadAll(resp.Body)
+		errorContext := ""
+		if readErr == nil {
+			errorContext = string(errorBodyBytes)
+		}
+
+		zap.L().Sugar().Fatalf("failed to fetch file, status: %s (code: %d), url: %s, response_snippet: '%s'",
+			resp.Status, resp.StatusCode, rawURL, errorContext)
+	}
+
+	fileContent, err := io.ReadAll(resp.Body) // io.ReadAll is preferred over ioutil.ReadAll since Go 1.16
+	if err != nil {
+		zap.L().Sugar().Fatalf("failed to read response body from %s: %w", rawURL, err)
+	}
+
+	var chartFile ChartsFile
+	if err = yaml.Unmarshal(fileContent, &chartFile); err != nil {
+		zap.L().Fatal("Failed to unmarshal charts bytes",
+			zap.Error(err))
+	}
+
+	charts := map[string]Chart{}
+
+	for _, chart := range chartFile.Charts {
+		chartName := strings.TrimSuffix(chart.Filename, ".yaml")
+		chartName = strings.TrimPrefix(chartName, "/charts/")
+		charts[chartName] = Chart{
+			Repo:    "rancher-rke2-charts",
+			Version: chart.Version,
+		}
+	}
+
+	return charts
+}
+
+func getUpdatedCharts(newCharts, prevCharts map[string]Chart) map[string]Chart {
+	updatedCharts := map[string]Chart{}
+	for name, details := range newCharts {
+		prevChart, ok := prevCharts[name]
+		if !ok {
+			updatedCharts[name] = details
+			continue
+		}
+		if prevChart.Version != details.Version {
+			updatedCharts[name] = details
+			continue
+		}
+	}
+	return updatedCharts
 }
 
 func main() {
-	charts := getUpdatedCharts("v1.30.13+rke2r1")
-	dd(charts)
+	prevCharts := getCharts(getPreviousVersion("v1.30.13+rke2r1"))
+	newCharts := getCharts("v1.30.13+rke2r1")
+	diffCharts := getUpdatedCharts(newCharts, prevCharts)
+	dd(diffCharts)
 	// Initialize Zap logger
 	var initErr error
 	logger, initErr = zap.NewDevelopment()
