@@ -21,7 +21,7 @@ func main() {
 	zap.ReplaceGlobals(logger)
 	defer logger.Sync()
 
-	if err := rke2.UpdateRKE2(""); err != nil {
+	if err := rke2.UpdateRKE2("v1.32.5+rke2r1", "v1.31.9+rke2r1"); err != nil {
 		logger.Fatal("Error updating releases sequence node", zap.Error(err))
 	}
 }

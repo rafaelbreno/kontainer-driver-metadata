@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 
+	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 )
 
@@ -17,28 +18,37 @@ const (
 func UpdateRKE2(versions ...string) error {
 	s := &S{}
 	if err := s.parseYaml(inputFile); err != nil {
+		zap.L().Error("parsing yaml", zap.Error(err))
 		return err
 	}
 
 	if err := s.setReleasesNode(); err != nil {
+		zap.L().Error("setting release node", zap.Error(err))
 		return err
 	}
 
 	releases, err := s.getReleases(versions)
 	if err != nil {
+		zap.L().Error("getting releases", zap.Error(err))
 		return err
 	}
 
 	for _, release := range releases {
-		if err := s.addRelease(release); err != nil {
+		if err = s.addRelease(release); err != nil {
+			zap.L().Error("adding release", zap.Error(err))
 			return err
 		}
 	}
 
 	b, err := s.Bytes()
+	if err != nil {
+		zap.L().Error("converting to bytes", zap.Error(err))
+		return err
+	}
 
 	err = os.WriteFile(outputFile, b, 0644)
 	if err != nil {
+		zap.L().Error("writing output file", zap.Error(err))
 		return err
 	}
 

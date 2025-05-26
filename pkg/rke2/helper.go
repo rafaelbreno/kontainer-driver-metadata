@@ -101,7 +101,6 @@ func getPreviousReleasePos(releaseNode *yaml.Node, version string) (int, error) 
 				if keyNode.Kind == yaml.ScalarNode {
 					switch keyNode.Value {
 					case "version":
-						fmt.Printf("%s == %s\n", valueNode.Value, version)
 						if valueNode.Value == version {
 							return i, nil
 						}
