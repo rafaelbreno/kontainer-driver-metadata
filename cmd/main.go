@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rancher/kontainer-driver-metadata/pkg/charts"
 	"go.uber.org/zap"
 	yaml "gopkg.in/yaml.v3"
 )
@@ -180,9 +181,12 @@ func getUpdatedCharts(newCharts, prevCharts map[string]Chart) map[string]Chart {
 }
 
 func main() {
-	prevCharts := getCharts(getPreviousVersion("v1.30.13+rke2r1"))
-	newCharts := getCharts("v1.30.13+rke2r1")
-	diffCharts := getUpdatedCharts(newCharts, prevCharts)
+	currentVersion := "v1.30.13+rke2r1"
+	prevVersion := getPreviousVersion(currentVersion)
+	diffCharts, err := charts.GetUpdatedCharts(currentVersion, prevVersion)
+	if err != nil {
+		panic(err)
+	}
 	dd(diffCharts)
 	// Initialize Zap logger
 	var initErr error
