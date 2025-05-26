@@ -62,6 +62,7 @@ func (s *S) Bytes() ([]byte, error) {
 
 	outputBytes = bytes.ReplaceAll(outputBytes, []byte("!!merge "), nil)
 	outputBytes = bytes.ReplaceAll(outputBytes, []byte(" {}"), nil)
+	return outputBytes, nil
 }
 
 func (s *S) addRelease(release Release) error {
