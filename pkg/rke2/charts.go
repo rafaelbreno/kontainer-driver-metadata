@@ -1,4 +1,4 @@
-package charts
+package rke2
 
 import (
 	"fmt"
@@ -6,18 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 type (
 	ChartsFile struct {
 		Charts []Chart `yaml:"charts"`
-	}
-
-	Chart struct {
-		Repo     string `yaml:"repo,omitempty"`
-		Version  string `yaml:"version,omitempty"`
-		Filename string `yaml:"filename,omitempty"`
 	}
 )
 
