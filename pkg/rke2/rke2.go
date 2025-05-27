@@ -65,7 +65,7 @@ type (
 )
 
 func (s *S) Bytes() ([]byte, error) {
-	outputBytes, err := yaml.Marshal(s.rootNode)
+	outputBytes, err := yaml.Marshal(&s.rootNode)
 	if err != nil {
 		return nil, err
 	}

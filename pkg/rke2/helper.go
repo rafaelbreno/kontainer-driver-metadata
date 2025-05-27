@@ -1,7 +1,9 @@
 package rke2
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -64,6 +66,13 @@ func getPreviousRelease(releaseNode *yaml.Node, version string) (int, Release, e
 						zap.String("anchorValue", valueNode.Anchor))
 				}
 			case "serverArgs":
+				fmt.Println("DocumentNode", yaml.DocumentNode)
+				fmt.Println("SequenceNode", yaml.SequenceNode)
+				fmt.Println("MappingNode", yaml.MappingNode)
+				fmt.Println("ScalarNode", yaml.ScalarNode)
+				fmt.Println("AliasNode", yaml.AliasNode)
+				fmt.Println("valueNode.Kind", valueNode.Kind)
+				dd(valueNode.Value)
 				if valueNode.Kind == yaml.MappingNode && valueNode.Anchor != "" {
 					release.serverArgsAnchor = valueNode.Anchor // This anchor name is from the file, assume it's valid
 					zap.L().Debug("Found serverArgs anchor from last release", zap.String("anchorName", release.serverArgsAnchor))
@@ -183,4 +192,35 @@ func strictlyAlphanumeric(input string) string {
 		}
 	}
 	return sb.String()
+}
+
+func dd(v any) {
+	pp(v)
+	os.Exit(1)
+}
+
+func pp(v any) {
+	if k, ok := v.(yaml.Node); ok {
+		b, err := yaml.Marshal(k)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(b))
+		return
+	}
+
+	if k, ok := v.(*yaml.Node); ok {
+		b, err := yaml.Marshal(k)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(b))
+		return
+	}
+
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(b))
 }
