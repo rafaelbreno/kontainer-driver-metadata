@@ -12,11 +12,13 @@ import (
 
 const (
 	inputFile  = "channels-rke2.yaml"
-	outputFile = "channels-rke2.output.yaml"
+	outputFile = "channels-rke2.yaml"
 )
 
 func UpdateRKE2(versions ...string) error {
-	s := &S{}
+	s := &S{
+		replaceMap: make(map[string]string),
+	}
 	if err := s.parseYaml(inputFile); err != nil {
 		zap.L().Error("parsing yaml", zap.Error(err))
 		return err
@@ -61,17 +63,32 @@ type (
 		rootNode        yaml.Node
 		rootDoc         *yaml.Node
 		releasesSeqNode *yaml.Node
+		// replaceMap map is
+		replaceMap map[string]string
 	}
 )
 
 func (s *S) Bytes() ([]byte, error) {
-	outputBytes, err := yaml.Marshal(&s.rootNode)
-	if err != nil {
+	var buf bytes.Buffer
+
+	encoder := yaml.NewEncoder(&buf)
+
+	encoder.SetIndent(2)
+
+	if err := encoder.Encode(&s.rootNode); err != nil {
 		return nil, err
 	}
 
+	if err := encoder.Close(); err != nil {
+		return nil, err
+	}
+
+	outputBytes := buf.Bytes()
 	outputBytes = bytes.ReplaceAll(outputBytes, []byte("!!merge "), nil)
 	outputBytes = bytes.ReplaceAll(outputBytes, []byte(" {}"), nil)
+	for k, v := range s.replaceMap {
+		outputBytes = bytes.ReplaceAll(outputBytes, []byte(k), []byte(v))
+	}
 	return outputBytes, nil
 }
 
@@ -88,10 +105,12 @@ func (s *S) addRelease(release Release) error {
 	newReleaseContent = append(newReleaseContent, createScalarNode("maxChannelServerVersion"), createScalarNode(prevRelease.MaxChannelServerVersion))
 
 	sanitizedVersionForAnchor := strictlyAlphanumeric(release.Version) // e.g., "v1216rke2r1"
+	versionForAnchor := getAnchorName(release.Version)
 
 	// defining charts
 	{
 		newChartsAnchorName := "charts" + sanitizedVersionForAnchor
+		s.replaceMap[newChartsAnchorName] = "charts" + versionForAnchor
 		chartsContent := []*yaml.Node{
 			{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"},
 			{Kind: yaml.AliasNode, Value: prevRelease.chartsAnchor}, // Alias value is the name of the anchor
@@ -114,6 +133,7 @@ func (s *S) addRelease(release Release) error {
 	// defining serverArgs
 	{
 		newServerArgsAnchorName := "serverArgs" + sanitizedVersionForAnchor // e.g., serverArgsv1216rke2r1
+		s.replaceMap[newServerArgsAnchorName] = "serverArgs" + versionForAnchor
 		serverArgsContent := []*yaml.Node{
 			{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"},
 			{Kind: yaml.AliasNode, Value: prevRelease.serverArgsAnchor}, // Alias value is the name of the anchor
@@ -130,6 +150,7 @@ func (s *S) addRelease(release Release) error {
 	// defining agentArgs
 	{
 		newAgentArgsAnchorName := "agentArgs" + sanitizedVersionForAnchor // e.g., agentArgsv1216rke2r1
+		s.replaceMap[newAgentArgsAnchorName] = "agentArgs" + versionForAnchor
 		agentArgsContent := []*yaml.Node{
 			{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"},
 			{Kind: yaml.AliasNode, Value: prevRelease.agentArgsAnchor}, // Alias value is the name of the anchor

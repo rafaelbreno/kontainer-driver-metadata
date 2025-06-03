@@ -204,6 +204,13 @@ func strictlyAlphanumeric(input string) string {
 	return sb.String()
 }
 
+func getAnchorName(input string) string {
+	input = strings.ReplaceAll(input, "+", "-")
+	input = strings.ReplaceAll(input, ".", "-")
+
+	return input
+}
+
 func dd(v any) {
 	pp(v)
 	os.Exit(1)
