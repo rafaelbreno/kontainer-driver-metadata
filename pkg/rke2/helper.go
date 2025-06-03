@@ -59,6 +59,11 @@ func getPreviousRelease(releaseNode *yaml.Node, version string) (int, Release, e
 				if valueNode.Kind == yaml.MappingNode && valueNode.Anchor != "" {
 					release.agentArgsAnchor = valueNode.Anchor // This anchor name is from the file, assume it's valid
 					zap.L().Debug("Found agentArgs anchor from last release", zap.String("anchorName", release.agentArgsAnchor))
+				} else if valueNode.Kind == yaml.AliasNode {
+					release.agentArgsAnchor = valueNode.Value
+					zap.L().Debug("Found agentArgs alias from last release",
+						zap.String("releaseVersion", prevVersion),
+						zap.String("aliasName", valueNode.Value))
 				} else {
 					zap.L().Warn("'agentArgs' in last release does not have an anchor or is not a map.",
 						zap.String("releaseVersion", prevVersion),
@@ -72,10 +77,15 @@ func getPreviousRelease(releaseNode *yaml.Node, version string) (int, Release, e
 				fmt.Println("ScalarNode", yaml.ScalarNode)
 				fmt.Println("AliasNode", yaml.AliasNode)
 				fmt.Println("valueNode.Kind", valueNode.Kind)
-				dd(valueNode.Value)
+				//dd(valueNode.Value)
 				if valueNode.Kind == yaml.MappingNode && valueNode.Anchor != "" {
 					release.serverArgsAnchor = valueNode.Anchor // This anchor name is from the file, assume it's valid
 					zap.L().Debug("Found serverArgs anchor from last release", zap.String("anchorName", release.serverArgsAnchor))
+				} else if valueNode.Kind == yaml.AliasNode {
+					release.serverArgsAnchor = valueNode.Value
+					zap.L().Debug("Found serverArgs alias from last release",
+						zap.String("releaseVersion", prevVersion),
+						zap.String("aliasName", valueNode.Value))
 				} else {
 					zap.L().Warn("'serverArgs' in last release does not have an anchor or is not a map.",
 						zap.String("releaseVersion", prevVersion),
